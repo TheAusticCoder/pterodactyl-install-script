@@ -11,6 +11,28 @@ check_command() {
     fi
 }
 
+# Prompt user for MariaDB root password
+read -sp 'Enter MariaDB root password: ' mariadb_root_password
+echo
+read -sp 'Confirm MariaDB root password: ' mariadb_root_password_confirm
+echo
+
+if [ "$mariadb_root_password" != "$mariadb_root_password_confirm" ]; then
+    echo "Passwords do not match. Exiting."
+    exit 1
+fi
+
+# Prompt user for Pterodactyl database user password
+read -sp 'Enter Pterodactyl database user password: ' pterodactyl_db_password
+echo
+read -sp 'Confirm Pterodactyl database user password: ' pterodactyl_db_password_confirm
+echo
+
+if [ "$pterodactyl_db_password" != "$pterodactyl_db_password_confirm" ]; then
+    echo "Passwords do not match. Exiting."
+    exit 1
+fi
+
 # Update package list and install dependencies
 check_command apt -y update
 check_command apt -y install software-properties-common curl apt-transport-https ca-certificates gnupg
@@ -26,6 +48,14 @@ check_command apt update
 
 # Install required packages
 check_command apt -y install php8.1 php8.1-{common,cli,gd,mysql,mbstring,bcmath,xml,fpm,curl,zip} mariadb-server nginx tar unzip git redis-server
+
+# Secure MariaDB installation
+check_command mysql -e "UPDATE mysql.user SET Password = PASSWORD('$mariadb_root_password') WHERE User = 'root'"
+check_command mysql -e "DELETE FROM mysql.user WHERE User=''"
+check_command mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1')"
+check_command mysql -e "DROP DATABASE IF EXISTS test"
+check_command mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%'"
+check_command mysql -e "FLUSH PRIVILEGES"
 
 # Install Composer
 check_command curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
@@ -52,6 +82,12 @@ check_command php artisan p:environment:database
 
 # Set up mail configuration
 check_command php artisan p:environment:mail
+
+# Create a database and user for Pterodactyl
+check_command mysql -u root -p"$mariadb_root_password" -e "CREATE USER 'pterodactyl'@'127.0.0.1' IDENTIFIED BY '$pterodactyl_db_password';"
+check_command mysql -u root -p"$mariadb_root_password" -e "CREATE DATABASE panel;"
+check_command mysql -u root -p"$mariadb_root_password" -e "GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'127.0.0.1' WITH GRANT OPTION;"
+check_command mysql -u root -p"$mariadb_root_password" -e "FLUSH PRIVILEGES;"
 
 # Run database migrations and seed data
 check_command php artisan migrate --seed --force
